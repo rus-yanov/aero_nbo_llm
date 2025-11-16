@@ -1,0 +1,57 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.whl
+*.pyo
+*.pyd
+
+# Logs / debug
+*.log
+logs/
+debug.log
+
+# Jupyter Notebook
+.ipynb_checkpoints
+.profile
+
+# PyCharm
+.idea/
+*.iml
+out/
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Remove temp datasets / models
+*.csv~
+*.tmp
+*.bak
+
+# Models (обученные модели НЕ храним)
+models/*.cbm         
+
+# Environment configuration
+.env
+*.env
+.env.*
+
+# Jupyter extensions / cache
+.jupyter/
+.ipython/
