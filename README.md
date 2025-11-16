@@ -36,8 +36,8 @@
 
   <h3>LLM-модуль</h3>
   <ul>
-    <li>OpenAI API (gpt-4.1-mini / gpt-4.1) — вариант A</li>
-    <li>transformers + Llama-3-8B / Mistral-7B — вариант B</li>
+    <li>Яндекс GPT — вариант A</li>
+    <li>Giga Chat — вариант B</li>
     <li>HuggingFace Inference или локальный запуск</li>
   </ul>
 
