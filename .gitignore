@@ -56,3 +56,5 @@ models/*.cbm
 .jupyter/
 .ipython/
 /notebooks/catboost_info/
+.DS_Store
+data/.DS_Store
