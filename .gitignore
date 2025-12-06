@@ -55,3 +55,4 @@ models/*.cbm
 # Jupyter extensions / cache
 .jupyter/
 .ipython/
+/notebooks/catboost_info/

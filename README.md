@@ -21,7 +21,7 @@
 
 <h2>2. Входные и выходные данные</h2>
 
-<h3>Входные данные</h3>
+<h3>2.1. Оффлайн-данные (обучение и батч-прогноз)</h3>
 <ul>
   <li><code>common_dataset.csv</code> — общий датасет:
     <ul>
@@ -41,38 +41,125 @@
       <li>категория и тип.</li>
     </ul>
   </li>
-  <li>Параметры запроса в пайплайн:
+</ul>
+
+<p>
+  На их основе формируется <code>ml_training_dataset.csv</code>, на котором обучается модель ранжирования.
+</p>
+
+<h3>2.2. Онлайн-вход в NBO-пайплайн</h3>
+
+<p>Пайплайн поддерживает два сценария использования.</p>
+
+<h4>А) Режим «по client_id» (внутренние данные)</h4>
+
+<p>На вход подаётся только идентификатор клиента и параметры вызова. Данные по клиенту берутся из подготовленного датасета.</p>
+
+<ul>
+  <li>Параметры запроса:
     <ul>
-      <li><code>client_id</code></li>
-      <li><code>top_n</code> (по умолчанию 3)</li>
-      <li><code>channel</code> (push/email/SMS)</li>
+      <li><code>client_id</code> — идентификатор клиента;</li>
+      <li><code>top_n</code> — сколько офферов вернуть (по умолчанию 3);</li>
+      <li><code>channel</code> — формат сообщения: <code>push</code> / <code>email</code> / <code>sms</code>.</li>
     </ul>
   </li>
 </ul>
 
-<h3>Выходные данные (JSON-ответ NBO-сервиса)</h3>
+<p>Пример запроса:</p>
+
+<pre><code>
+curl -X POST http://localhost:8000/api/v1/nbo/by-client \
+  -H "Content-Type: application/json" \
+  -d '{
+        "client_id": 12490,
+        "top_n": 3,
+        "channel": "push",
+        "provider": "gigachat"
+      }'
+</code></pre>
+
+<h4>Б) Режим «по фичам» (внешняя система шлёт строки датасета)</h4>
+
+<p>
+  Внешний сервис может передать сразу набор строк с признаками 
+  (аналог строк <code>ml_training_dataset.csv</code> без таргета <code>conversion</code>).
+</p>
+
+<ul>
+  <li>Параметры запроса:
+    <ul>
+      <li><code>rows</code> — список JSON-объектов с признаками <code>client × offer × context</code>;</li>
+      <li><code>client_id</code> — необязательно, может быть взят из первой строки <code>rows</code>;</li>
+      <li><code>top_n</code>, <code>channel</code> — аналогично режиму А.</li>
+    </ul>
+  </li>
+</ul>
+
+<p>Пример запроса:</p>
+
+<pre><code>
+curl -X POST http://localhost:8000/api/v1/nbo/by-rows \
+  -H "Content-Type: application/json" \
+  -d '{
+        "client_id": 12490,
+        "top_n": 3,
+        "channel": "push",
+        "rows": [
+          {
+            "client_id": 12490,
+            "offer_id": 0,
+            "offer_type": "discount_10",
+            "offer_category": "category_1",
+            "cost": 5.0,
+            "offer_AOV": 30.0,
+            "price_segment": "mid",
+            "recency_days": 10,
+            "frequency_90d": 5,
+            "monetary_90d": 5000,
+            "discounts_used_90d": 2,
+            "avg_discount_percent_90d": 15.0,
+            "favorite_category": "category_1",
+            "email_open_rate_30d": 0.4
+            // ... остальные фичи по схеме обучающего датасета
+          }
+        ]
+      }'
+</code></pre>
+
+<h3>2.3. Выходные данные (JSON-ответ NBO-сервиса)</h3>
+
+<p>
+  В обоих режимах пайплайн возвращает одинаковый JSON, 
+  сформированный модулем <code>src/service/nbo_pipeline.py</code>.
+</p>
 
 <pre><code>{
   "client_id": 12345678,
+  "channel": "push",
+  "user_profile": "Краткий текстовый профиль клиента на естественном языке...",
   "best_offer": {
     "offer_id": 987,
     "p_click": 0.27,
     "title": "Скидка 20% на электронику",
-    "personalized_message": "Ваш персональный бонус…"
+    "short_description": "Краткое описание оффера...",
+    "conditions": "Условия действия предложения...",
+    "personalized_message": "Ваш персональный бонус на электронику, подобранную под ваш обычный уровень трат..."
   },
   "alternative_offers": [
     {
       "offer_id": 654,
       "p_click": 0.19,
       "title": "Бесплатная доставка",
-      "personalized_message": "Для вас доставка…"
+      "short_description": "Доставка без доплат при заказе от 5000 ₽",
+      "conditions": "Только для онлайн-заказов до конца недели.",
+      "personalized_message": "Для вас действует бесплатная доставка на ближайший заказ — без лишних условий."
     }
   ]
 }
 </code></pre>
 
 <p>
-Ответ формирует модуль <code>src/service/nbo_pipeline.py</code>.
+  Этот формат предназначен для прямой интеграции с сервисом рассылок или оркестратором кампаний.
 </p>
 
 
@@ -123,7 +210,7 @@
       <li>RFM-фичи и промо-чувствительность,</li>
       <li>трафик и каналы коммуникации,</li>
       <li>категории и типы офферов,</li>
-      <li>демографию, device и поведенческие признаки.</li>
+      <li>демографию и поведенческие признаки.</li>
     </ul>
   </li>
 
@@ -133,18 +220,18 @@
   </li>
 
   <li>
-    Для конкретного <code>client_id</code> модель считает <code>p_click</code> для всех офферов 
-    из <code>offers.csv</code>, ранжирует их и выбирает лучший или top-N.
+    Для конкретного клиента (по <code>client_id</code> или по переданным строкам <code>rows</code>) 
+    модель считает <code>p_click</code> для всех доступных офферов, 
+    ранжирует их и выбирает лучший оффер и top-N альтернатив.
   </li>
 
   <li>
-    Далее создаётся текстовый профиль клиента:
+    На основе признаков клиента формируется краткий текстовый профиль:
     <ul>
-      <li>поведение, активность, интересы;</li>
-      <li>любимые категории;</li>
-      <li>чувствительность к скидкам;</li>
-      <li>динамика заказов;</li>
-      <li>device-поведение и каналы.</li>
+      <li>активность и давность покупок,</li>
+      <li>частота и суммы трат,</li>
+      <li>любимые категории и чувствительность к скидкам,</li>
+      <li>канал и поведенческие характеристики.</li>
     </ul>
   </li>
 
@@ -153,20 +240,19 @@
     <ul>
       <li>текстовый профиль клиента,</li>
       <li>данные оффера (title, description, conditions),</li>
-      <li>канал коммуникации (push/email/SMS),</li>
-      <li>шаблон промпта.</li>
+      <li>канал коммуникации (push/email/SMS) и соответствующий промпт-шаблон.</li>
     </ul>
-    На основе этого формируется персонализированное сообщение.
+    На основе этого формируется персонализированное сообщение под каждый выбранный оффер.
   </li>
 
   <li>
     Модуль <code>src/service/nbo_pipeline.py</code> объединяет результаты ML и LLM 
-    в единый JSON-ответ:
+    в единый JSON-ответ, удобный для интеграции с сервисом рассылок:
     <ul>
+      <li><code>user_profile</code>,</li>
       <li><code>best_offer</code>,</li>
       <li><code>alternative_offers</code>,</li>
-      <li><code>personalized_message</code>,</li>
-      <li><code>p_click</code>.</li>
+      <li><code>p_click</code> и <code>personalized_message</code> для каждого оффера.</li>
     </ul>
   </li>
 </ol>
@@ -189,7 +275,7 @@
   <li><b>03_train_ranking_model.ipynb</b> — обучение ML-ранжировщика</li>
   <li><b>04_user_profile_builder.ipynb</b> — генерация профиля клиента</li>
   <li><b>05_llm_generation.ipynb</b> — генерация LLM-сообщений</li>
-  <li><b>06_nbo_llm_demo.ipynb</b> — полный пайплайн ML → LLM → JSON</li>
+  <li><b>06_nbo_llm_demo.ipynb</b> — демонстрация полного пайплайна ML → LLM → JSON</li>
 </ul>
 
 
@@ -200,6 +286,7 @@
   <li>компонент текстового профиля клиента;</li>
   <li>LLM-модуль на базе ЯндексGPT или GigaChat;</li>
   <li>модуль <code>nbo_pipeline.py</code> для формирования JSON-ответов;</li>
+  <li>две схемы интеграции: по <code>client_id</code> и по внешним фичам (<code>rows</code>);</li>
   <li>демо-пайплайн и материалы для аналитической записки.</li>
 </ul>
 

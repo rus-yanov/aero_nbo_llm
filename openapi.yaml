@@ -1,0 +1,272 @@
+openapi: 3.0.3
+info:
+  title: Aero NBO + LLM API
+  version: "1.0.0"
+  description: |
+    API сервиса Next Best Offer:
+    - ML-ранжирование офферов по вероятности клика (p_click),
+    - генерация персонализированных сообщений через LLM.
+
+servers:
+  - url: http://localhost:8000
+    description: Локальный сервер разработки
+
+paths:
+  /api/v1/nbo/by-client:
+    post:
+      summary: Получить NBO по client_id (внутренние данные)
+      description: >
+        Основной сценарий: сервис сам берёт все нужные данные из
+        ml_training_dataset по client_id, ранжирует офферы и генерирует
+        тексты сообщений.
+      operationId: nboByClient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NboByClientRequest"
+      responses:
+        "200":
+          description: Успешный ответ с лучшим оффером и альтернативами
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NboResponse"
+        "422":
+          description: Ошибка валидации входных данных
+
+  /api/v1/nbo/by-rows:
+    post:
+      summary: Получить NBO по внешним фичам (online-режим)
+      description: >
+        Онлайн-режим: внешняя система присылает готовые строки (rows) с
+        признаками client–offer. Сервис считает p_click, строит профиль
+        клиента и тексты сообщений.
+      operationId: nboByRows
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NboByRowsRequest"
+      responses:
+        "200":
+          description: Успешный ответ с лучшим оффером и альтернативами
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NboResponse"
+        "422":
+          description: Ошибка валидации входных данных
+
+components:
+  schemas:
+    NboByClientRequest:
+      type: object
+      required:
+        - client_id
+      properties:
+        client_id:
+          type: integer
+          format: int64
+          description: Идентификатор клиента
+          example: 16189
+        top_n:
+          type: integer
+          description: Сколько лучших офферов вернуть (включая best_offer)
+          default: 3
+          example: 3
+        channel:
+          type: string
+          description: Канал коммуникации (определяет шаблон промпта)
+          enum: [push, email, sms]
+          default: push
+          example: push
+        provider:
+          type: string
+          nullable: true
+          description: >
+            Провайдер LLM. Если не указан — берётся значение по умолчанию
+            в конфиге (например, dummy/gigachat/yandex_gpt).
+          example: gigachat
+
+    NboByRowsRequest:
+      type: object
+      required:
+        - rows
+      properties:
+        rows:
+          type: array
+          description: >
+            Массив строк с признаками client–offer. Структура близка к
+            ml_training_dataset (кроме поля conversion).
+          items:
+            $ref: "#/components/schemas/FeatureRow"
+        top_n:
+          type: integer
+          description: Сколько лучших офферов вернуть
+          default: 3
+          example: 3
+        channel:
+          type: string
+          description: Канал коммуникации
+          enum: [push, email, sms]
+          default: push
+          example: email
+        provider:
+          type: string
+          nullable: true
+          description: Провайдер LLM (см. NboByClientRequest)
+          example: gigachat
+        client_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            Явно переданный client_id. Если не указан — берётся из поля
+            client_id первой строки в rows.
+
+    FeatureRow:
+      type: object
+      description: >
+        Одна строка витрины признаков client–offer.
+        Минимально необходимые поля приведены ниже; дополнительные
+        признаки допускаются.
+      properties:
+        client_id:
+          type: integer
+          format: int64
+          description: Идентификатор клиента
+          example: 16189
+        offer_id:
+          type: integer
+          format: int64
+          description: Идентификатор оффера
+          example: 0
+        treatment:
+          type: integer
+          description: Флаг показа оффера (1 — показан, 0 — контроль)
+          example: 1
+        treatment_date:
+          type: string
+          format: date
+          description: Дата показанного оффера
+          example: "2024-04-12"
+        offer_type:
+          type: string
+          description: Тип оффера (скидка, бесплатная доставка и т.п.)
+          example: discount_10
+        offer_category:
+          type: string
+          description: Категория оффера
+          example: category_8
+        cost:
+          type: number
+          format: float
+          description: Себестоимость / стоимость стимулирования
+          example: 2.09
+        offer_AOV:
+          type: number
+          format: float
+          description: Средний чек по офферу (AOV)
+          example: 19.59
+        channel:
+          type: string
+          description: Канал, по которому планируется коммуникация
+          enum: [push, email, sms]
+          example: push
+        recency_days:
+          type: integer
+          description: Давность последней покупки (RFM-признак)
+          example: 15
+        frequency_90d:
+          type: integer
+          description: Частота покупок за 90 дней
+          example: 11
+        monetary_90d:
+          type: number
+          format: float
+          description: Сумма трат за 90 дней
+          example: 215.48
+        email_open_rate_30d:
+          type: number
+          format: float
+          description: Открываемость e-mail за 30 дней
+          example: 0.81
+        discounts_used_90d:
+          type: integer
+          description: Количество использованных скидок за 90 дней
+          example: 4
+        favorite_category:
+          type: string
+          description: Любимая категория клиента
+          example: category_8
+        price_segment:
+          type: string
+          description: Ценовой сегмент клиента
+          example: budget
+      additionalProperties:
+        description: Дополнительные признаки, не перечисленные явно
+
+    OfferPayload:
+      type: object
+      description: Ранжированный оффер с персонализированным текстом
+      properties:
+        offer_id:
+          type: integer
+          format: int64
+          description: Идентификатор оффера
+          example: 0
+        p_click:
+          type: number
+          format: float
+          description: Прогнозная вероятность клика по офферу
+          example: 0.3322
+        title:
+          type: string
+          description: Короткое название оффера (для UI/аналитики)
+          example: "Offer 0"
+        short_description:
+          type: string
+          description: Краткое описание оффера (если есть)
+          example: "Скидка 10% на все товары категории 8"
+        conditions:
+          type: string
+          description: Условия акции / оффера
+          example: "Минимальная сумма заказа — 1000 ₽"
+        personalized_message:
+          type: string
+          description: Персонализированный текст сообщения от LLM
+          example: "Подбирайте товары категории 8 с умом — наш оффер даст вам 10% экономии!"
+
+    NboResponse:
+      type: object
+      description: Ответ NBO-сервиса
+      properties:
+        client_id:
+          type: integer
+          format: int64
+          description: Идентификатор клиента
+          example: 16189
+        channel:
+          type: string
+          description: Канал коммуникации
+          enum: [push, email, sms]
+          example: push
+        user_profile:
+          type: string
+          description: Текстовый профиль клиента, сгенерированный на основе признаков
+          example: >
+            Краткий профиль клиента: давность последней покупки 15 дней,
+            сегмент budget, любимая категория category_8...
+        best_offer:
+          allOf:
+            - $ref: "#/components/schemas/OfferPayload"
+          nullable: true
+          description: Лучший оффер для клиента (может быть null, если офферов нет)
+        alternative_offers:
+          type: array
+          description: Альтернативные офферы, отсортированные по p_click
+          items:
+            $ref: "#/components/schemas/OfferPayload"
