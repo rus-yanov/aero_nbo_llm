@@ -104,6 +104,7 @@ curl -X POST http://localhost:8000/api/v1/nbo/by-rows \
         "client_id": 12490,
         "top_n": 3,
         "channel": "push",
+        "provider": "gigachat",
         "rows": [
           {
             "client_id": 12490,
