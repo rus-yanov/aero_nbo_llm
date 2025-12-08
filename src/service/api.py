@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI
 from pydantic import BaseModel
+from dotenv import load_dotenv
+load_dotenv()
 
 from src.service.nbo_pipeline import (
     get_nbo_response,

@@ -1,4 +1,3 @@
-# src/service/nbo_pipeline.py
 from __future__ import annotations
 
 from typing import Any, Mapping, Sequence, Dict, List, Optional
@@ -6,17 +5,21 @@ from typing import Any, Mapping, Sequence, Dict, List, Optional
 import pandas as pd
 from catboost import Pool
 
-from src.utils.config import ML_TRAINING_DATASET_PATH, DEFAULT_CHANNEL, DEFAULT_TOP_N
+from src.utils.config import (
+    ML_TRAINING_DATASET_PATH,
+    DEFAULT_CHANNEL,
+    DEFAULT_TOP_N,
+)
 from src.ml.ranking_model import load_ranking_model
-from src.utils.config import ML_TRAINING_DATASET_PATH
 from src.llm.user_profile_builder import build_user_profile
 from src.llm.message_generator import generate_message
+
 
 def _load_feature_schema():
     """
     Восстанавливаем структуру признаков из ml_training_dataset.csv.
     target = conversion
-    категория = объектные столбцы
+    категория = object-столбцы.
     """
     df = pd.read_csv(ML_TRAINING_DATASET_PATH, nrows=100)
     feature_cols = [c for c in df.columns if c != "conversion"]
@@ -24,25 +27,54 @@ def _load_feature_schema():
     cat_indices = [feature_cols.index(c) for c in cat_features]
     return feature_cols, cat_features, cat_indices
 
-def _score_offers(df: pd.DataFrame):
+def _score_offers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Считаем p_click для строк client × offer и
+    фильтруем офферы по условию рентабельности:
+        p_click >= cost / offer_AOV
+
+    Дополнительно: терпимо относимся к «укороченным» payload’ам.
+    Недостающие фичи из схемы обучающего датаcета заполняем
+    дефолтами (0.0 или "unknown").
+    """
     model = load_ranking_model()
 
-    # узнаём колонки, на которых обучалась модель
+    # схема фичей из ml_training_dataset.csv
     feature_cols, cat_features, cat_indices = _load_feature_schema()
 
     df = df.copy()
-    X = df[feature_cols]
 
+    # --- добиваем недостающие колонки под схему обучающего датасета ---
+    for col in feature_cols:
+        if col not in df.columns:
+            if col in cat_features:
+                df[col] = "unknown"
+            else:
+                df[col] = 0.0
+
+    # теперь в df есть все нужные фичи
+    X = df[feature_cols]
     pool = Pool(X, cat_features=cat_indices)
+
+    # прогноз CTR
     df["p_click"] = model.predict_proba(pool)[:, 1]
-    df = df.sort_values("p_click", ascending=False)
-    return df
+
+    # --- бизнес-фильтр рентабельности ---
+    if "cost" in df.columns and "offer_AOV" in df.columns:
+        # защищаемся от деления на 0
+        safe_aov = df["offer_AOV"].replace(0, float("inf"))
+        df["min_required_p"] = df["cost"] / safe_aov
+
+        # оставляем только офферы с ожидаемой выручкой >= стоимости скидки
+        df = df[df["p_click"] >= df["min_required_p"]]
+
+    # если всё отфильтровали, выше это корректно обработается (вернём empty)
+    return df.sort_values("p_click", ascending=False)
 
 
 def _row_to_offer_dict(row: pd.Series) -> Dict[str, Any]:
     """
     Приводим строку к словарю оффера, с которым удобно работать LLM.
-    В реальном проекте сюда можно добавить больше полей.
     """
     return {
         "offer_id": int(row["offer_id"]),
@@ -77,7 +109,6 @@ def _build_response(
             "alternative_offers": [],
         }
 
-    # Берём первую строку для построения профиля клиента
     profile_row = top.iloc[0]
     user_profile = build_user_profile(profile_row)
 
@@ -88,7 +119,7 @@ def _build_response(
             user_profile=user_profile,
             offer=offer,
             channel=channel,
-            provider=provider or "dummy",
+            provider=provider
         )
 
         offers_payload.append(
@@ -120,7 +151,7 @@ def get_nbo_response(
     provider: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Основной сценарий:
+    Основной сценарий:>
     - читаем ml_training_dataset.csv,
     - фильтруем строки по client_id,
     - считаем p_click,
@@ -160,9 +191,9 @@ def get_nbo_response_from_rows(
 ) -> Dict[str, Any]:
     """
     Онлайн-режим:
-    - rows — список словарей, каждый соответствует паре client–offer
+    - rows — список словарей client–offer–context
       с теми же полями, что и в обучающем датасете (кроме conversion).
-    - client_id можно передать отдельно, либо берем из первого ряда.
+    - client_id можно передать отдельно, либо берём из первой строки.
     """
     if not rows:
         raise ValueError("rows must be non-empty")
